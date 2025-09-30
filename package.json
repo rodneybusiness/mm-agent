@@ -1,14 +1,41 @@
 {
   "name": "mm-agent",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "An intelligent multi-agent orchestration system powered by Claude Sonnet 4",
+  "main": "src/index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "npx tsx index.ts",
+    "dev": "npx tsx index.ts --interactive",
+    "demo": "npx tsx index.ts",
+    "build": "tsc",
+    "lint": "eslint src/**/*.ts",
+    "test": "echo \"Tests coming soon\" && exit 0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "anthropic",
+    "typescript",
+    "automation",
+    "orchestration",
+    "multi-agent",
+    "file-management",
+    "web-scraping",
+    "code-analysis",
+    "data-processing",
+    "task-planning"
+  ],
+  "author": "MM-Agent Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rodneybusiness/mm-agent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rodneybusiness/mm-agent/issues"
+  },
+  "homepage": "https://github.com/rodneybusiness/mm-agent#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
     "@types/fs-extra": "^11.0.4",
