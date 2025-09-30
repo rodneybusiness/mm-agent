@@ -29,3 +29,5 @@ npx tsx index.ts
 ## Repository
 
 This project is available at: https://github.com/rodneybusiness/mm-agent
+
+**Project Location:** `/Users/newuser/Desktop/RR Coding Experiments/active-projects/mm-agent`
