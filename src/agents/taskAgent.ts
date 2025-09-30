@@ -1,5 +1,6 @@
-import { Agent, Tool, AgentResponse, TaskPlanSchema, ExecuteTaskSchema, TaskStep, ExecutionPlan } from '../types';
+import { Agent, Tool, AgentResponse, AnthropicTool, TaskPlanSchema, ExecuteTaskSchema, TaskStep, ExecutionPlan } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export class TaskPlanningAgent implements Agent {
   name = 'Task Planning Agent';
@@ -541,5 +542,20 @@ export class TaskPlanningAgent implements Agent {
     });
 
     return completedPlans.length;
+  }
+
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }

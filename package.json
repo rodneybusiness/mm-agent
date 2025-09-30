@@ -1,12 +1,13 @@
 {
   "name": "mm-agent",
-  "version": "1.0.0",
-  "description": "An intelligent multi-agent orchestration system powered by Claude Sonnet 4",
+  "version": "1.1.0",
+  "description": "An intelligent multi-agent orchestration system with SDK agent control - Claude autonomously uses tools to complete complex tasks",
   "main": "src/index.ts",
   "scripts": {
     "start": "npx tsx index.ts",
     "dev": "npx tsx index.ts --interactive",
     "demo": "npx tsx index.ts",
+    "demo:tools": "npx tsx demo-tools.ts",
     "build": "tsc",
     "lint": "eslint src/**/*.ts",
     "test": "echo \"Tests coming soon\" && exit 0"
@@ -20,6 +21,10 @@
     "automation",
     "orchestration",
     "multi-agent",
+    "agentic-ai",
+    "tool-use",
+    "function-calling",
+    "sdk-agent-control",
     "file-management",
     "web-scraping",
     "code-analysis",
@@ -49,6 +54,11 @@
     "pdf-parse": "^1.1.1",
     "tsx": "^4.20.6",
     "uuid": "^13.0.0",
-    "zod": "^4.1.11"
+    "zod": "^4.1.11",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "^5.9.2"
   }
 }

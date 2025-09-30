@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MessageParam, TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources';
 
 // Base agent interface
 export interface Agent {
@@ -6,6 +7,7 @@ export interface Agent {
   description: string;
   tools: Tool[];
   execute(input: string): Promise<AgentResponse>;
+  getAnthropicTools(): AnthropicTool[];
 }
 
 // Tool interface for agent capabilities
@@ -14,6 +16,25 @@ export interface Tool {
   description: string;
   schema: z.ZodSchema;
   execute: (params: any) => Promise<any>;
+}
+
+// Anthropic tool definition
+export interface AnthropicTool {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, any>;
+    required?: string[];
+  };
+}
+
+// Conversation message types
+export type ConversationMessage = MessageParam;
+
+export interface ConversationContext {
+  messages: ConversationMessage[];
+  maxHistory?: number;
 }
 
 // Agent response structure

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Agent, AgentResponse } from '../types';
+import type { MessageParam, TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources';
+import { Agent, AgentResponse, ConversationContext, AnthropicTool } from '../types';
 import { FileManagementAgent } from '../agents/fileAgent';
 import { WebResearchAgent } from '../agents/webAgent';
 import { CodeAnalysisAgent } from '../agents/codeAgent';
@@ -20,6 +21,7 @@ export class AgentOrchestrator {
   private claudeClient: Anthropic;
   private logger: Logger;
   private config: Required<OrchestratorConfig>;
+  private conversationHistory: Map<string, ConversationContext> = new Map();
   
   constructor(config: OrchestratorConfig) {
     this.config = {
@@ -45,7 +47,7 @@ export class AgentOrchestrator {
     this.agents.set('data', new DataProcessingAgent());
   }
 
-  async processRequest(input: string): Promise<{
+  async processRequest(input: string, sessionId: string = 'default'): Promise<{
     response: string;
     agentResponses: AgentResponse[];
     executionTime: number;
@@ -55,6 +57,12 @@ export class AgentOrchestrator {
     this.logger.info(`Processing request: ${input.substring(0, 100)}...`);
 
     try {
+      // Get or create conversation context
+      const context = this.getConversationContext(sessionId);
+      
+      // Add user message to history
+      context.messages.push({ role: 'user', content: input });
+
       // Use Claude to determine which agents to use and how
       const agentPlan = await this.planExecution(input);
       this.logger.debug('Execution plan generated', agentPlan);
@@ -63,7 +71,13 @@ export class AgentOrchestrator {
       const agentResponses = await this.executeAgentPlan(agentPlan, input);
       
       // Generate final response using Claude
-      const finalResponse = await this.generateFinalResponse(input, agentResponses);
+      const finalResponse = await this.generateFinalResponse(input, agentResponses, context);
+      
+      // Add assistant response to history
+      context.messages.push({ role: 'assistant', content: finalResponse.response });
+      
+      // Trim history if needed
+      this.trimConversationHistory(context);
       
       const executionTime = Date.now() - startTime;
       this.logger.info(`Request completed in ${executionTime}ms`);
@@ -236,7 +250,8 @@ Choose agents based on the request content. You can select multiple agents if th
 
   private async generateFinalResponse(
     originalInput: string,
-    agentResponses: AgentResponse[]
+    agentResponses: AgentResponse[],
+    context: ConversationContext
   ): Promise<{ response: string; tokens: number }> {
     const successfulResponses = agentResponses.filter(r => r.success);
     const failedResponses = agentResponses.filter(r => !r.success);
@@ -321,6 +336,127 @@ Response:`;
     return await agent.execute(input);
   }
 
+  async executeAgentWithTools(
+    agentKey: string,
+    input: string,
+    sessionId: string = 'default'
+  ): Promise<AgentResponse> {
+    const agent = this.agents.get(agentKey);
+    if (!agent) {
+      return {
+        success: false,
+        error: `Agent '${agentKey}' not found`,
+        toolsUsed: []
+      };
+    }
+
+    // Create a fresh context for each tool execution to avoid conversation state issues
+    const context: ConversationContext = {
+      messages: [],
+      maxHistory: 20
+    };
+    context.messages.push({ role: 'user', content: input });
+
+    const tools = agent.getAnthropicTools();
+    const toolsUsed: string[] = [];
+    let continueLoop = true;
+    let finalResult: any = null;
+
+    this.logger.info(`Executing agent ${agentKey} with tool use support`);
+
+    while (continueLoop) {
+      try {
+        const response = await this.claudeClient.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          messages: context.messages,
+          tools: tools.length > 0 ? tools : undefined
+        });
+
+        // Process response
+        const toolUseBlocks: ToolUseBlock[] = [];
+        let textResponse = '';
+
+        for (const content of response.content) {
+          if (content.type === 'text') {
+            textResponse += (content as TextBlock).text;
+          } else if (content.type === 'tool_use') {
+            toolUseBlocks.push(content as ToolUseBlock);
+          }
+        }
+
+        if (toolUseBlocks.length === 0) {
+          // No more tools to execute, we're done
+          context.messages.push({ role: 'assistant', content: response.content });
+          finalResult = textResponse;
+          continueLoop = false;
+        } else {
+          // Execute tools and continue conversation
+          context.messages.push({ role: 'assistant', content: response.content });
+          
+          const toolResults = await Promise.all(
+            toolUseBlocks.map(async (toolUse) => {
+              const tool = agent.tools.find(t => t.name === toolUse.name);
+              
+              if (!tool) {
+                return {
+                  type: 'tool_result' as const,
+                  tool_use_id: toolUse.id,
+                  content: `Error: Tool ${toolUse.name} not found`,
+                  is_error: true
+                };
+              }
+
+              toolsUsed.push(tool.name);
+              this.logger.debug(`Executing tool: ${tool.name}`);
+
+              try {
+                const result = await tool.execute(toolUse.input);
+                return {
+                  type: 'tool_result' as const,
+                  tool_use_id: toolUse.id,
+                  content: JSON.stringify(result)
+                };
+              } catch (error) {
+                return {
+                  type: 'tool_result' as const,
+                  tool_use_id: toolUse.id,
+                  content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                  is_error: true
+                };
+              }
+            })
+          );
+
+          context.messages.push({ role: 'user', content: toolResults });
+        }
+
+        // Stop after reasonable number of turns
+        if (context.messages.length > 50) {
+          this.logger.warn('Max conversation turns reached');
+          continueLoop = false;
+        }
+
+      } catch (error) {
+        this.logger.error('Error in tool execution loop', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          toolsUsed
+        };
+      }
+    }
+
+    this.trimConversationHistory(context);
+
+    return {
+      success: true,
+      result: finalResult,
+      toolsUsed,
+      metadata: { timestamp: new Date().toISOString() }
+    };
+  }
+
   getAgentTools(agentKey: string): any[] {
     const agent = this.agents.get(agentKey);
     if (!agent) return [];
@@ -379,6 +515,28 @@ Response:`;
       claudeConnection,
       uptime: Date.now() - startTime
     };
+  }
+
+  private getConversationContext(sessionId: string): ConversationContext {
+    if (!this.conversationHistory.has(sessionId)) {
+      this.conversationHistory.set(sessionId, {
+        messages: [],
+        maxHistory: 20
+      });
+    }
+    return this.conversationHistory.get(sessionId)!;
+  }
+
+  private trimConversationHistory(context: ConversationContext): void {
+    const maxHistory = context.maxHistory || 20;
+    if (context.messages.length > maxHistory) {
+      context.messages = context.messages.slice(-maxHistory);
+    }
+  }
+
+  clearConversation(sessionId: string = 'default'): void {
+    this.conversationHistory.delete(sessionId);
+    this.logger.info(`Conversation history cleared for session: ${sessionId}`);
   }
 
   // Configuration management

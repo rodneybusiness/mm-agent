@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { Agent, Tool, AgentResponse, WebScrapeSchema, WebSearchSchema } from '../types';
+import { Agent, Tool, AgentResponse, AnthropicTool, WebScrapeSchema, WebSearchSchema } from '../types';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export class WebResearchAgent implements Agent {
   name = 'Web Research Agent';
@@ -356,5 +357,20 @@ export class WebResearchAgent implements Agent {
     });
     
     return images;
+  }
+
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }

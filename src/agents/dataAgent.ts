@@ -2,7 +2,8 @@ import * as fs from 'fs-extra';
 import * as csv from 'fast-csv';
 import * as path from 'path';
 import * as pdfParse from 'pdf-parse';
-import { Agent, Tool, AgentResponse, CsvProcessSchema, JsonProcessSchema } from '../types';
+import { Agent, Tool, AgentResponse, AnthropicTool, CsvProcessSchema, JsonProcessSchema } from '../types';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export class DataProcessingAgent implements Agent {
   name = 'Data Processing Agent';
@@ -706,5 +707,20 @@ export class DataProcessingAgent implements Agent {
     } catch {
       return 'Unknown';
     }
+  }
+
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }

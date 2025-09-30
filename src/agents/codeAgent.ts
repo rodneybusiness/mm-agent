@@ -1,7 +1,8 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { glob } from 'glob';
-import { Agent, Tool, AgentResponse, CodeAnalyzeSchema, CodeSuggestionSchema } from '../types';
+import { Agent, Tool, AgentResponse, AnthropicTool, CodeAnalyzeSchema, CodeSuggestionSchema } from '../types';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export class CodeAnalysisAgent implements Agent {
   name = 'Code Analysis Agent';
@@ -864,5 +865,20 @@ export class CodeAnalysisAgent implements Agent {
   private isCodeFile(filePath: string): boolean {
     const codeExtensions = ['.js', '.ts', '.py', '.java', '.cpp', '.c', '.cs', '.php', '.rb', '.go', '.rs'];
     return codeExtensions.includes(path.extname(filePath).toLowerCase());
+  }
+
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }

@@ -1,6 +1,8 @@
 # 🤖 MM-Agent
 
-An intelligent multi-agent orchestration system powered by Claude Sonnet 4, featuring specialized agents for file management, web research, code analysis, task planning, and data processing.
+An intelligent multi-agent orchestration system powered by Claude Sonnet 4 with **full agentic tool control**. Features specialized agents that autonomously use tools to complete complex tasks through natural conversation.
+
+> **✨ Now with SDK Agent Control**: Claude autonomously decides which tools to use, when to use them, and how to combine results - true agentic behavior!
 
 ## ✨ Features
 
@@ -21,6 +23,8 @@ An intelligent multi-agent orchestration system powered by Claude Sonnet 4, feat
 
 ### 🏗️ **Production-Ready Architecture**
 - **Type-Safe**: Complete TypeScript implementation with Zod validation
+- **🆕 Agentic Tool Control**: Claude autonomously orchestrates tool usage via Anthropic SDK
+- **🆕 Conversation History**: Multi-turn conversations with context preservation
 - **Error Handling**: Comprehensive error recovery and user feedback
 - **Logging**: Color-coded console output with performance tracking
 - **Health Monitoring**: Real-time agent status and connectivity checks
@@ -57,11 +61,44 @@ ANTHROPIC_API_KEY=your-actual-api-key-here
 # Demo mode with example requests
 npx tsx index.ts
 
+# Tool-based agent demo (NEW - shows autonomous tool use)
+npx tsx demo-tools.ts
+
 # Interactive mode
 npx tsx index.ts --interactive
 ```
 
 ## 📖 Usage Examples
+
+### 🆕 Agentic Tool Control (Recommended)
+
+The new `executeAgentWithTools()` method gives Claude full control over tool execution:
+
+```typescript
+import { AgentOrchestrator } from './src/core/orchestrator';
+
+const orchestrator = new AgentOrchestrator({
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
+  model: 'claude-sonnet-4-20250514'
+});
+
+// Claude autonomously decides which tools to use and when
+const result = await orchestrator.executeAgentWithTools(
+  'file',
+  'List all TypeScript files, find the largest one, and show me package.json',
+  'session-123'
+);
+
+console.log(result.result);        // Claude's response
+console.log(result.toolsUsed);     // Tools Claude decided to use
+```
+
+**What happens:**
+- Claude reads your request
+- Autonomously calls `list_files` multiple times
+- Calls `analyze_file` to check sizes
+- Calls `read_file` to get package.json
+- Synthesizes all data into a comprehensive answer
 
 ### Basic Commands
 ```bash
@@ -128,18 +165,37 @@ src/
 
 1. **Create agent class** implementing the `Agent` interface
 2. **Define tools** with Zod schemas for validation
-3. **Register agent** in the orchestrator
-4. **Add type definitions** for new schemas
+3. **Implement `getAnthropicTools()`** for SDK compatibility
+4. **Register agent** in the orchestrator
+5. **Add type definitions** for new schemas
 
 Example agent structure:
 ```typescript
+import { zodToJsonSchema } from 'zod-to-json-schema';
+
 export class CustomAgent implements Agent {
   name = 'Custom Agent';
   description = 'Agent description';
   tools: Tool[] = [/* tool definitions */];
   
   async execute(input: string): Promise<AgentResponse> {
-    // Implementation
+    // Legacy implementation
+  }
+  
+  // 🆕 Required for SDK agent control
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }
 ```
@@ -169,11 +225,21 @@ const orchestrator = new AgentOrchestrator({
 ### Key Methods
 
 ```typescript
-// Process natural language requests
+// 🆕 Execute agent with full tool control (RECOMMENDED)
+await orchestrator.executeAgentWithTools(
+  'file',                    // Agent to use
+  'your request here',       // Natural language request
+  'session-id'               // Optional session for conversation history
+);
+
+// Process natural language requests (legacy method)
 await orchestrator.processRequest("your request here");
 
-// Execute specific agent
+// Execute specific agent (legacy method)
 await orchestrator.executeSpecificAgent("file", "analyze directory");
+
+// 🆕 Manage conversation history
+orchestrator.clearConversation('session-id');
 
 // Health monitoring
 const status = await orchestrator.health();
@@ -215,10 +281,35 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **Issues**: [Report bugs and request features](https://github.com/rodneybusiness/mm-agent/issues)
 - **Anthropic Claude**: [Official Documentation](https://docs.anthropic.com/)
 
-## 💡 Roadmap
+## 📍 Current Status (v1.1.0)
 
+### ✅ Just Completed
+- **SDK Agent Control**: Full agentic tool orchestration via Anthropic SDK
+- **Conversation History**: Multi-turn conversations with session management
+- **Tool Schema Generation**: Automatic conversion from Zod to Anthropic tool format
+- **Autonomous Tool Loops**: Claude decides tool usage patterns dynamically
+
+### 🎯 What This Means
+Each agent now has **true agency** - Claude autonomously:
+- Decides which tools to call based on the task
+- Determines how many times to call tools
+- Combines results from multiple tool calls
+- Maintains conversation context across interactions
+
+### 🔜 Next Steps (Immediate)
+- [ ] Enhance tool implementations for better autonomous behavior
+- [ ] Add streaming support for real-time tool execution feedback
+- [ ] Implement tool result caching for performance
+- [ ] Add multi-agent coordination with tool sharing
+
+### 💡 Future Roadmap
 - [ ] Additional agent types (Email, Database, API)
-- [ ] Web-based dashboard interface  
-- [ ] Plugin system for custom agents
-- [ ] Advanced workflow templates
+- [ ] Web-based dashboard interface with tool execution visualization
+- [ ] Plugin system for custom agents and tools
+- [ ] Advanced workflow templates with tool orchestration
 - [ ] Multi-language support
+- [ ] Tool execution analytics and optimization
+
+## 🔄 Recent Changes
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.

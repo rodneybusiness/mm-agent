@@ -2,7 +2,8 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { glob } from 'glob';
 import * as crypto from 'crypto';
-import { Agent, Tool, AgentResponse, FileReadSchema, FileWriteSchema, FileAnalyzeSchema } from '../types';
+import { Agent, Tool, AgentResponse, AnthropicTool, FileReadSchema, FileWriteSchema, FileAnalyzeSchema } from '../types';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export class FileManagementAgent implements Agent {
   name = 'File Management Agent';
@@ -296,5 +297,20 @@ export class FileManagementAgent implements Agent {
     };
 
     return languageMap[ext] || 'text';
+  }
+
+  getAnthropicTools(): AnthropicTool[] {
+    return this.tools.map(tool => {
+      const jsonSchema = zodToJsonSchema(tool.schema, { $refStrategy: 'none' }) as any;
+      return {
+        name: tool.name,
+        description: tool.description,
+        input_schema: {
+          type: 'object',
+          properties: jsonSchema.properties || {},
+          required: jsonSchema.required || []
+        }
+      };
+    });
   }
 }
