@@ -7,6 +7,8 @@ import { CodeAnalysisAgent } from '../agents/codeAgent';
 import { TaskPlanningAgent } from '../agents/taskAgent';
 import { DataProcessingAgent } from '../agents/dataAgent';
 import { Logger } from './logger';
+import { EventEmitter, ToolEvent, SessionEvent } from './event-emitter';
+import { AnalyticsEngine } from './analytics';
 
 export interface OrchestratorConfig {
   anthropicApiKey: string;
@@ -14,6 +16,8 @@ export interface OrchestratorConfig {
   maxTokens?: number;
   temperature?: number;
   enableLogging?: boolean;
+  enableAnalytics?: boolean;
+  analyticsDbPath?: string;
 }
 
 export class AgentOrchestrator {
@@ -22,6 +26,8 @@ export class AgentOrchestrator {
   private logger: Logger;
   private config: Required<OrchestratorConfig>;
   private conversationHistory: Map<string, ConversationContext> = new Map();
+  public events: EventEmitter;
+  private analytics?: AnalyticsEngine;
   
   constructor(config: OrchestratorConfig) {
     this.config = {
@@ -29,14 +35,61 @@ export class AgentOrchestrator {
       model: config.model || 'claude-sonnet-4-20250514',
       maxTokens: config.maxTokens || 1000,
       temperature: config.temperature || 0.7,
-      enableLogging: config.enableLogging ?? true
+      enableLogging: config.enableLogging ?? true,
+      enableAnalytics: config.enableAnalytics ?? true,
+      analyticsDbPath: config.analyticsDbPath
     };
 
     this.claudeClient = new Anthropic({ apiKey: this.config.anthropicApiKey });
     this.logger = new Logger(this.config.enableLogging);
+    this.events = new EventEmitter();
+    
+    if (this.config.enableAnalytics) {
+      this.analytics = new AnalyticsEngine(this.config.analyticsDbPath);
+      this.setupAnalyticsListeners();
+    }
     
     this.initializeAgents();
     this.logger.info('Agent Orchestrator initialized with all agents');
+  }
+  
+  private setupAnalyticsListeners(): void {
+    if (!this.analytics) return;
+    
+    this.events.on('tool_complete', async (event: ToolEvent) => {
+      await this.analytics!.recordToolExecution({
+        sessionId: event.sessionId,
+        agentKey: event.agentKey,
+        toolName: event.toolName,
+        startedAt: event.timestamp - (event.duration || 0),
+        completedAt: event.timestamp,
+        status: 'success',
+        inputSize: event.data?.inputSize,
+        outputSize: event.data?.outputSize
+      });
+    });
+    
+    this.events.on('tool_error', async (event: ToolEvent) => {
+      await this.analytics!.recordToolExecution({
+        sessionId: event.sessionId,
+        agentKey: event.agentKey,
+        toolName: event.toolName,
+        startedAt: event.timestamp - (event.duration || 0),
+        completedAt: event.timestamp,
+        status: 'error',
+        errorMessage: event.error
+      });
+    });
+    
+    this.events.on('session_start', async (event: SessionEvent) => {
+      await this.analytics!.recordSessionStart(event.sessionId, event.agentKey);
+    });
+    
+    this.events.on('session_end', async (event: SessionEvent) => {
+      if (event.data) {
+        await this.analytics!.recordSessionEnd(event.sessionId, event.data);
+      }
+    });
   }
 
   private initializeAgents(): void {
@@ -363,6 +416,14 @@ Response:`;
     let finalResult: any = null;
 
     this.logger.info(`Executing agent ${agentKey} with tool use support`);
+    
+    // Emit session start event
+    await this.events.emit('session_start', {
+      type: 'session_start' as const,
+      sessionId,
+      agentKey,
+      timestamp: Date.now()
+    });
 
     while (continueLoop) {
       try {
@@ -409,15 +470,56 @@ Response:`;
 
               toolsUsed.push(tool.name);
               this.logger.debug(`Executing tool: ${tool.name}`);
+              
+              const toolStartTime = Date.now();
+              
+              // Emit tool start event
+              await this.events.emit('tool_start', {
+                type: 'tool_start' as const,
+                sessionId,
+                agentKey,
+                toolName: tool.name,
+                timestamp: toolStartTime,
+                data: { input: toolUse.input }
+              });
 
               try {
                 const result = await tool.execute(toolUse.input);
+                const toolEndTime = Date.now();
+                
+                // Emit tool complete event
+                await this.events.emit('tool_complete', {
+                  type: 'tool_complete' as const,
+                  sessionId,
+                  agentKey,
+                  toolName: tool.name,
+                  timestamp: toolEndTime,
+                  duration: toolEndTime - toolStartTime,
+                  data: { 
+                    inputSize: JSON.stringify(toolUse.input).length,
+                    outputSize: JSON.stringify(result).length
+                  }
+                });
+                
                 return {
                   type: 'tool_result' as const,
                   tool_use_id: toolUse.id,
                   content: JSON.stringify(result)
                 };
               } catch (error) {
+                const toolEndTime = Date.now();
+                
+                // Emit tool error event
+                await this.events.emit('tool_error', {
+                  type: 'tool_error' as const,
+                  sessionId,
+                  agentKey,
+                  toolName: tool.name,
+                  timestamp: toolEndTime,
+                  duration: toolEndTime - toolStartTime,
+                  error: error instanceof Error ? error.message : 'Unknown error'
+                });
+                
                 return {
                   type: 'tool_result' as const,
                   tool_use_id: toolUse.id,
@@ -448,6 +550,21 @@ Response:`;
     }
 
     this.trimConversationHistory(context);
+    
+    // Emit session end event
+    const successCount = toolsUsed.length; // All completed tools (errors would have thrown)
+    await this.events.emit('session_end', {
+      type: 'session_end' as const,
+      sessionId,
+      agentKey,
+      timestamp: Date.now(),
+      data: {
+        totalTools: toolsUsed.length,
+        successCount,
+        errorCount: 0,
+        finalResult
+      }
+    });
 
     return {
       success: true,
@@ -553,5 +670,9 @@ Response:`;
   getConfig(): Omit<Required<OrchestratorConfig>, 'anthropicApiKey'> {
     const { anthropicApiKey, ...safeConfig } = this.config;
     return safeConfig;
+  }
+  
+  getAnalytics(): AnalyticsEngine | undefined {
+    return this.analytics;
   }
 }
